@@ -1,6 +1,7 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import asyncio
@@ -10,6 +11,14 @@ import random
 from adapters import get_adapter
 
 app = FastAPI(title="免费大模型中转服务", description="中转调用免费国产大模型的API服务")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -64,29 +73,6 @@ async def chat_completions(request: ChatCompletionRequest):
     else:
         result = await adapter.chat(messages)
         return result
-
-@app.websocket("/ws/chat")
-async def websocket_chat(websocket: Request):
-    await websocket.accept()
-    try:
-        while True:
-            data = await websocket.receive_text()
-            payload = json.loads(data)
-            model = payload.get("model", "doubao")
-            messages = payload.get("messages", [])
-            
-            adapter = get_adapter(model)
-            if not adapter:
-                await websocket.send_json({"error": f"不支持的模型: {model}"})
-                continue
-            
-            async for chunk in adapter.chat_stream(messages):
-                await websocket.send_json(chunk)
-            await websocket.send_json({"finish": True})
-    except Exception as e:
-        await websocket.send_json({"error": str(e)})
-    finally:
-        await websocket.close()
 
 @app.get("/health")
 async def health_check():
