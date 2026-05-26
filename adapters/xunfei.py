@@ -1,4 +1,5 @@
 import asyncio
+import aiohttp
 from typing import List, Dict, Any, AsyncGenerator
 from .base import BaseAdapter
 
@@ -6,16 +7,47 @@ class XunfeiAdapter(BaseAdapter):
     
     def __init__(self):
         self.model = "xunfei"
+        self.session = None
+    
+    async def _get_session(self):
+        if not self.session:
+            self.session = aiohttp.ClientSession(
+                headers={
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                    'Origin': 'https://xinghuo.xfyun.cn',
+                    'Referer': 'https://xinghuo.xfyun.cn/',
+                }
+            )
+        return self.session
     
     async def chat(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
         await asyncio.sleep(1)
         user_msg = messages[-1].get("content", "") if messages else ""
-        response = f"【讯飞星火】你问的是：{user_msg}\n\n这是讯飞星火给你的回答。由于当前环境无法访问外部API，这是一个模拟响应。\n\n在实际部署环境中，你将获得真实的AI回复。\n\n讯飞星火认知大模型是科大讯飞自主研发的，具备强大的语言理解和生成能力！"
-        return self.build_response(response, self.model)
+        
+        session = await self._get_session()
+        try:
+            async with session.post(
+                "https://xinghuo.xfyun.cn/api/chat",
+                json={
+                    "input": user_msg,
+                    "model": "Spark",
+                    "temperature": 0.7
+                }
+            ) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    content = result.get("response", "")
+                    if content:
+                        return self.build_response(content, self.model)
+                return self.build_response(f"【讯飞星火】你问的是：{user_msg}\n\n讯飞星火认知大模型是科大讯飞自主研发的，具备强大的语言理解和生成能力。当前为模拟响应模式。", self.model)
+        except Exception as e:
+            return self.build_response(f"【讯飞星火】你问的是：{user_msg}\n\n讯飞星火认知大模型是科大讯飞自主研发的，具备强大的语言理解和生成能力。当前为模拟响应模式。\n\n错误信息：{str(e)}", self.model)
     
     async def chat_stream(self, messages: List[Dict[str, str]]) -> AsyncGenerator[Dict[str, Any], None]:
         user_msg = messages[-1].get("content", "") if messages else ""
-        response = f"【讯飞星火】你问的是：{user_msg}\n\n这是讯飞星火给你的回答。由于当前环境无法访问外部API，这是一个模拟响应。\n\n在实际部署环境中，你将获得真实的AI回复。\n\n讯飞星火认知大模型是科大讯飞自主研发的，具备强大的语言理解和生成能力！"
+        response = f"【讯飞星火】你问的是：{user_msg}\n\n讯飞星火认知大模型是科大讯飞自主研发的，具备强大的语言理解和生成能力。当前为模拟响应模式。\n\n在实际部署中，如果网络可以访问讯飞星火官网，可以直接模拟网页请求获取真实响应。"
         
         for char in response:
             yield self.build_stream_chunk(char, self.model)
