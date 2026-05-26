@@ -1,55 +1,63 @@
 import asyncio
 import aiohttp
-from typing import List, Dict, Any, AsyncGenerator
+import json
+from typing import List, Dict, Any, Optional, AsyncGenerator
 from .base import BaseAdapter
 
 class XunfeiAdapter(BaseAdapter):
-    
+
     def __init__(self):
-        self.model = "xunfei"
-        self.session = None
-    
-    async def _get_session(self):
-        if not self.session:
-            self.session = aiohttp.ClientSession(
-                headers={
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json',
-                    'Origin': 'https://xinghuo.xfyun.cn',
-                    'Referer': 'https://xinghuo.xfyun.cn/',
-                }
-            )
-        return self.session
-    
-    async def chat(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
-        await asyncio.sleep(1)
+        super().__init__("xunfei")
+
+    async def _call_api(self, messages: List[Dict[str, str]]) -> Optional[str]:
+        session = await self.get_session()
+        async with session.post(
+            self.model_info["api_url"],
+            json={"model": "generalv3", "messages": messages, "stream": False},
+            headers=self._get_api_headers()
+        ) as resp:
+            if resp.status == 200:
+                result = await resp.json()
+                return result.get("choices", [{}])[0].get("message", {}).get("content")
+        return None
+
+    async def _call_api_stream(self, messages: List[Dict[str, str]]) -> AsyncGenerator[str, None]:
+        session = await self.get_session()
+        async with session.post(
+            self.model_info["api_url"],
+            json={"model": "generalv3", "messages": messages, "stream": True},
+            headers=self._get_api_headers()
+        ) as resp:
+            if resp.status == 200:
+                async for line in resp.content:
+                    line = line.decode('utf-8').strip()
+                    if line.startswith("data: "):
+                        data = line[6:]
+                        if data == "[DONE]":
+                            return
+                        try:
+                            chunk = json.loads(data)
+                            content = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                            if content:
+                                yield content
+                        except:
+                            pass
+            else:
+                raise Exception(f"API returned {resp.status}")
+
+    async def _call_web(self, messages: List[Dict[str, str]]) -> Optional[str]:
+        return None
+
+    async def _call_web_stream(self, messages: List[Dict[str, str]]) -> AsyncGenerator[str, None]:
+        return
+        yield
+
+    async def _mock_response(self, messages: List[Dict[str, str]]) -> str:
         user_msg = messages[-1].get("content", "") if messages else ""
-        
-        session = await self._get_session()
-        try:
-            async with session.post(
-                "https://xinghuo.xfyun.cn/api/chat",
-                json={
-                    "input": user_msg,
-                    "model": "Spark",
-                    "temperature": 0.7
-                }
-            ) as response:
-                if response.status == 200:
-                    result = await response.json()
-                    content = result.get("response", "")
-                    if content:
-                        return self.build_response(content, self.model)
-                return self.build_response(f"【讯飞星火】你问的是：{user_msg}\n\n讯飞星火认知大模型是科大讯飞自主研发的，具备强大的语言理解和生成能力。当前为模拟响应模式。", self.model)
-        except Exception as e:
-            return self.build_response(f"【讯飞星火】你问的是：{user_msg}\n\n讯飞星火认知大模型是科大讯飞自主研发的，具备强大的语言理解和生成能力。当前为模拟响应模式。\n\n错误信息：{str(e)}", self.model)
-    
-    async def chat_stream(self, messages: List[Dict[str, str]]) -> AsyncGenerator[Dict[str, Any], None]:
-        user_msg = messages[-1].get("content", "") if messages else ""
-        response = f"【讯飞星火】你问的是：{user_msg}\n\n讯飞星火认知大模型是科大讯飞自主研发的，具备强大的语言理解和生成能力。当前为模拟响应模式。\n\n在实际部署中，如果网络可以访问讯飞星火官网，可以直接模拟网页请求获取真实响应。"
-        
+        return f"[模拟响应] 你好！我是讯飞星火。你问的是：「{user_msg}」\n\n讯飞星火认知大模型是科大讯飞自主研发的，具备强大的语言理解和生成能力。当前为模拟响应模式，配置 API Key 后可获得真实回复。"
+
+    async def _mock_response_stream(self, messages: List[Dict[str, str]]) -> AsyncGenerator[str, None]:
+        response = await self._mock_response(messages)
         for char in response:
-            yield self.build_stream_chunk(char, self.model)
-            await asyncio.sleep(0.03)
-        yield self.build_stream_chunk("", self.model, finish=True)
+            yield char
+            await asyncio.sleep(0.02)
